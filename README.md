@@ -4,7 +4,7 @@ This application was created for Cypress College in collaboration with Magnolia 
 
 ## Getting Started
 
-Download the "darkarmy.html" file and double click it. If your computer doesn't know what to do with .html files, just make sure your preferred browser opens it.
+Download the "DarkArmy.html" file and double click it. Simple. If your computer doesn't know what to do with .html files, just make sure your preferred browser opens it.
 
 ### Prerequisites
 
