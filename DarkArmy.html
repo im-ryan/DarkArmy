@@ -1,0 +1,1349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>The Dark Army</title>
+
+    <meta name="author" content="Ryan Huett">
+    <meta name="description" content="Simple Dark Army gameboard for online play. This gameboard provides a player-friendly GUI for the game master to display to players.">
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.8.1/css/bulma.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.13.0/css/all.min.css">
+
+    <style>        
+        /* Page Structure */
+        html {
+            box-sizing: border-box;
+        }
+        *, *:before, *:after {
+            box-sizing: inherit;
+        }
+        html, body, #app {
+            height: 100vh;
+            width: 100vw;
+        }
+        #app header {
+            display: flex;
+            justify-content: space-between;
+            justify-items: center;
+            height: 13vh;
+            padding: 0 3rem 0 1.5rem;
+        }
+        #app header button, #app header h1 { align-self: center; }
+        #gameboard { height: 87vh; }
+
+        /* Game Setup */
+        #playerList, #missionList, #hackersList, .centered-list {
+            display: inline-block;
+            text-align: left;
+        }
+        .capped-height {
+            overflow-y: scroll;
+            max-height: 25vh;
+            padding: 0 1.5rem;
+        }
+        .center-page {
+            height: 100vh;
+            width: 100vw;
+            z-index: 1;
+            position: absolute;
+            top: 0;
+
+            display: flex;
+            flex-direction: column;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-self: center;
+            align-items: center;
+        }
+        .center-page footer {
+            width: 100vw;
+            position: absolute;
+            bottom: 0;
+        }
+        .group-is-centered { justify-content: center !important; }
+        .setup {
+            text-align: center;
+            margin-bottom: 4rem;
+        }
+        #addPlayersNote{ margin-bottom: 1.5rem; }
+        #playerList, #squadList { cursor: pointer; }
+        .delete {
+            vertical-align: baseline;
+            margin-left: 0.25rem;
+        }
+        .progress { border-radius: 0; }
+        .fas, .far { margin-right: 0.5rem; }
+
+        /* View Modal */
+        iframe { margin-bottom: 1rem; }
+        #introModal .modal-card-body {
+            overflow: scroll;
+            height: 75vh;
+            margin-bottom: 5rem;
+        }
+
+        /* Game board */
+        #top-row { 
+            height: 75%;
+            padding-top: 1.5rem;
+        }
+        #bottom-row { height: 25%; }
+        #scores { list-style-type: none; }
+        #left-column { padding-left: 4.5rem; }
+        #missionReports { padding: 0 1.5rem; }
+        .missionStatsList { padding-left: 1.5rem; }
+        .small-control {
+            width: 60%;
+            margin-right: auto;
+            margin-left: auto;
+        }
+        #numFailVotes { text-align: center; }
+        .help { cursor: text !important;}
+        .has-text-orange { color: hsl(28, 100%, 67%);}
+
+        /* Game Over */
+        .modal-card-body ul {
+            list-style-type: disc !important;
+            padding-left: 1.5rem;
+        }
+    </style>
+</head>
+
+<body>
+    <main id="app">
+
+        <header>
+            <h1 class="title is-1">Dark Army Gameboard</h1>
+            <btn-restart v-if="isGameStarted" v-bind:gameStarted="isGameStarted"></btn-restart>
+        </header>
+
+        <!-- Set Up -->
+        <div v-if="!isGameStarted" class="center-page">
+
+            <!-- Select Game Type -->
+            <form v-if="setUpCurrentStep == 0" v-on:submit.self.prevent class="box setup">
+                <h3 class="title is-4">Game Type</h3>
+                <div class="field">
+                    <p class="is-marginless">A small game is for 4-11 players, while a cell battle is for 4-11 teams.</p>
+
+                    <div class="control has-text-centered" style="margin-top: 1.5rem;">
+                        <button v-on:click="nextScreen(false)" class="button is-primary">Small Game</button>
+                        <button v-on:click="nextScreen(true)" class="button is-outlined">Cell Battle</button>
+                    </div>
+                </div>
+            </form> <!-- ./Select Game Type -->
+
+            <!-- Player List -->
+            <div v-if="setUpCurrentStep == 1" class="box setup">
+                <div v-if="!isCellBattle">
+                    <list ref="players" title="player" v-bind:min-amount="defaultValues.minimumPlayers" v-bind:options="[
+                        {
+                            name: 'Player',
+                            placeholder: 'John'
+                        }
+                    ]"></list>
+                </div>
+                <div v-else>
+                    <list ref="players" title="player" v-bind:min-amount="defaultValues.minimumPlayers" v-bind:options="[
+                        {
+                            name: 'Cell',
+                            placeholder: 'Alpha Team'
+                        },
+                        {
+                            name: 'Contact',
+                            placeholder: 'John'
+                        }
+                    ]"></list>
+                </div>
+            </div> <!-- ./Player List -->
+
+            <!-- Role Assignment -->
+            <div v-if="setUpCurrentStep == 2" class="box setup">
+                <h3 class="title is-5">Player Role Assignment</h3>
+
+                <div class="content">
+                    <p class="has-text-danger">Please make sure your screen is not visible to the players. Once ready, please click the button below:</p>
+                    <button v-on:click="assignPlayerRoles" class="button is-info">
+                        <span v-if="hackerIds.length == 0">Assign Player Roles</span>
+                        <span v-else>Reassign Player Roles</span>
+                    </button>
+                </div>
+
+                <div v-if="hackerIds.length > 0" class="content">
+                    <h4 class="title is-marginless">Hackers:</h4>
+                    <ol id="hackersList">
+                        <li v-for="hackerId in hackerIds">
+                            {{ findPlayer(hackerId).name }}
+                        </li>
+                    </ol>
+
+                    <div class="control has-text-centered">
+                        <button v-on:click="nextScreen" class="button is-primary">Finished</button>
+                    </div>
+                    <small class="help is-info">
+                        Note: Roles are assigned randomly with the recommended amount of hackers. You can click the button as many times as you want to get the desired outcome.
+                    </small>
+                </div>
+            </div> <!-- ./Role Assignment -->
+
+            <!-- Game Options -->
+            <div v-if="setUpCurrentStep == 3" class="box setup">
+                <h3 class="title is-5">Game Options</h3>
+
+                <form id="optionsForm" v-on:submit.self.prevent>
+                    <div v-for="(opt, key) in options" class="field">
+                        <div v-if="opt.type === Boolean" class="control">
+                            <label class="checkbox">
+                                <input type="checkbox" v-bind:id="key" v-bind:name="key" v-model="opt.value" autocomplete="false">
+                                {{ opt.name }}
+                                <span v-bind:title="opt.description" style="margin-left: 0.5rem;">
+                                    <i class="fas fa-question-circle has-text-info"></i>
+                                </span>
+                            </label>
+                        </div>
+                        <div v-else>
+                            <label v-bind:for="key" class="label">
+                                {{ opt.name }}
+                                <span v-bind:title="opt.description" style="margin-left: 0.5rem;">
+                                    <i class="fas fa-question-circle has-text-info"></i>
+                                </span>
+                            </label>
+                            <div class="control">
+                                <input type="text" v-bind:id="key" v-bind:name="key" class="input" v-model="opt.value" autocomplete="false">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="field" style="margin-top: 1.5rem;">
+                        <div class="control has-text-centered">
+                            <button v-on:click="nextScreen()" class="button is-primary">Finished</button>
+                        </div>
+                    </div>
+                </form>
+            </div> <!-- ./Game Options-->
+
+            <!-- Game Setup Confirmation -->
+            <div v-if="setUpCurrentStep == 4" class="box content setup">
+                <h3 class="title is-5">Setup Confirmation</h3>
+                <div>
+                    <h5 class="title is-marginless">Players</h5>
+                    <ol class="centered-list capped-height">
+                        <li v-for="player in playerList">
+                            <span v-if="player.cellId != null"><strong>{{ cellList[player.cellId].name }}</strong>:</span> {{ player.name }}
+                        </li>
+                    </ol>
+                </div>
+                <div v-if="canViewHackers" style="margin-top: 0.5rem;">
+                    <h5 class="title is-marginless">Hackers</h5>
+                    <ul class="centered-list">
+                        <li v-for="hackerId in hackerIds">{{ findPlayer(hackerId).name }}</li>
+                    </ul>
+                </div>
+                <p style="margin: 0.5rem 0;">
+                    <strong>Game Type</strong>:
+                    {{ getGameType }}
+                </p>
+                <p style="margin-bottom: 0.5rem;">
+                    <strong>Mission Count</strong>:
+                    {{ defaultValues.missionCount }}
+                </p>
+                <p v-for="opt in options" style="margin-bottom: 0.5rem;">
+                    <strong>{{ opt.name }}</strong>:
+                    <span style="text-transform: capitalize;">{{ opt.value }}</span>
+                </p>
+                <div>
+                    <button v-on:click="toggleHackerView" class="button is-danger is-outlined">
+                        <span v-if="!canViewHackers">View Hackers</span>
+                        <span v-else>Hide Hackers</span>
+                    </button>
+                    <button v-on:click="nextScreen" class="button is-primary">Play Game</button>
+                </div>
+            </div> <!-- ./Game Setup Confirmation -->
+
+            <!-- Progress & Options -->
+            <footer>
+                <form v-on:submit.self.prevent>
+                    <div class="field">
+                        <div class="control has-text-centered">
+                            <button v-if="setUpCurrentStep > 0" v-on:click="prevScreen"
+                                class="button is-info is-outlined">
+                                <i class="fas fa-undo"></i>
+                                Back
+                            </button>
+
+                            <intro ref="gameIntro"></intro>
+                            <button v-on:click="$refs.gameIntro.viewIntro()" class="button is-info">
+                                <i class="far fa-eye"></i>
+                                View Intro
+                            </button>
+
+                            <btn-restart v-if="setUpCurrentStep > 0"></btn-restart>
+                        </div>
+                        <div class="control">
+                        </div>
+                    </div>
+                    <div class="field">
+                        <div class="control">
+                            <progress v-bind:value="setUpCurrentStep" v-bind:max="defaultValues.setUpMaxSteps"
+                                class="progress is-primary">
+                                {{ setUpCurrentStep }}%
+                            </progress>
+                        </div>
+                    </div>
+                </form>
+            </footer> <!-- ./Progress & Options -->
+
+        </div> <!-- ./Set Up -->
+
+        <!-- Game board -->
+        <div v-else id="gameboard">
+
+            <!-- Top Row -->
+            <div id="top-row" class="columns">
+
+                <!-- Left Column -->
+                <div id="left-column" class="column is-one-quarter">
+
+                    <div class="columns">
+
+                        <!-- Score Tracker -->
+                        <div class="column content centered-list">
+                            <h3 class="title is-4 is-marginless">Scores</h3>
+                        
+                            <ul id="scores">
+                                <li class="subtitle is-5 has-text-success is-marginless">
+                                    <span class="icon">
+                                        <i class="fas fa-user-tie"></i>
+                                    </span>
+                                    Employees:
+                                    <b>{{ scores.employees }}</b>
+                                </li>
+                                <li class="subtitle is-5 has-text-danger">
+                                    <span class="icon">
+                                        <i class="fas fa-user-secret"></i>
+                                    </span>
+                                    Hackers:
+                                    <b>{{ scores.hackers }}</b>
+                                </li>
+                            </ul>
+                        </div> <!-- ./Score Tracker -->
+
+                    </div>
+                    <div class="columns">
+
+                        <!-- Player List -->
+                        <div class="column content centered-list">
+                            <h3 class="title is-4 is-marginless">Players</h3>
+                            <ol>
+                                <li v-for="player in playerList">
+                                    <span v-bind:class="getPlayerColorClass(player.id)">
+                                        <span v-if="player.cellId != null">
+                                            <strong>{{ cellList[player.cellId].name }}</strong>
+                                            <br>
+                                        </span>
+                                        {{ player.name }}
+                                    </span>
+                                </li>
+                            </ol>
+                        </div> <!-- /Player List -->
+
+                    </div>
+                </div> <!-- /Left Column -->
+
+                <!-- Right Column -->
+                <div id="right-column" class="column">
+                    <div class="columns">
+                        <div class="column has-text-centered">
+                            <h3 class="title">
+                                Mission {{ currentMission }}:
+                                <span v-if="getCurrentMission.isSquadConfirmed">Outcome</span>
+                                <span v-else>Current Squad</span>
+                            </h3>
+                            
+                            <!-- Squad Builder -->
+                            <div v-if="!getCurrentMission.isSquadConfirmed">
+                                <div id="squadList" class="content">
+                                    <small v-if="getCurrentMission.squadIds.length == 0" class="help is-info">
+                                        Note: <b>The Cyber Lead should nominate {{ getCurrentMission.playerCount }} players</b>. The entire team
+                                        should vote on if they agree with the team makeup, where majority rules. If the team doesn't agree, then the
+                                        Cyber Lead needs to nominate new players based on their team's recommendations.
+                                    </small>
+                                    <ol v-else>
+                                        <li v-for="(playerId, i) in getCurrentMission.squadIds" v-on:click="removePlayerFromSquad(i)">
+                                            <span v-if="findPlayer(playerId).cellId != null">
+                                                <strong>{{ cellList[findPlayer(playerId).cellId].name }}</strong>:
+                                            </span>
+                                            {{ findPlayer(playerId).name }}
+                                            <i class="delete is-small has-background-danger"></i>
+                                        </li>
+                                    </ol>
+                                </div>
+                                
+                                <form v-on:submit.self.prevent>
+                                    <h3 class="subtitle is-4">Squad Builder</h3>
+                                    <div id="team-select">
+                                        <div class="field">
+                                            <label for="playerSelect" class="label">Player Select:</label>
+                                            <div class="control has-text-centered">
+                                                <div class="select">
+                                                    <select ref="playerSelect" id="playerSelect">
+                                                        <option value="-1">Click to view players...</option>
+                                                        <option v-for="player in playerList" v-bind:value="player.id" v-bind:disabled="player.isOnSquad">
+                                                            {{ player.name }}
+                                                        </option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="field">
+                                            <div class="control has-text-centered">
+                                                <button v-on:click="addPlayerToSquad" class="button is-info" v-bind:disabled="isSquadSet || scores.winner != 'None'">
+                                                    Add Player to Squad
+                                                </button>
+                                                <button v-on:click="confirmSquad" class="button is-primary" v-bind:disabled="!isSquadSet || scores.winner != 'None'">
+                                                    Confirm Squad
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div v-if="getCurrentMission.squadIds.length > 0" class="content">
+                                        <small class="help is-info">
+                                            Note: <b>The Cyber Lead should nominate {{ getCurrentMission.playerCount - getCurrentMission.squadIds.length }} more player(s).</b>
+                                        </small>
+                                        <small class="help is-info">Note: You can remove a single player by clicking on their name in the list above.</small>
+                                    </div>
+                                    <div v-if="errorMessages.squad">
+                                        <small class="help is-danger">{{ errorMessages.squad }}</small>
+                                    </div>
+                                </form>
+                            </div> <!-- ./Squad Builder -->
+
+                            <!-- Mission Outcome -->
+                            <form v-else v-on:submit.self.prevent>
+                                <div class="field">
+                                    <small class="help is-info">
+                                        Note: Time to start collecting the team's mission votes. Reminder that employees are only able to vote Success, while hackers can choose either Success or Failure.
+                                    </small>
+                                </div>
+                                <div class="field">
+                                    <h6 class="subtitle">How many fail votes were cast?</h6>
+                                </div>
+                                <div class="field">
+                                    <label for="">Number of Fail Votes:</label>
+                                    <div class="control small-control">
+                                        <input type="number" id="numFailVotes" class="input" min="0" v-bind:max="getCurrentMission.playerCount" placeholder="0">
+                                    </div>
+                                </div>
+                                <div class="field has-text-centered">
+                                    <button v-on:click="updateMission()" class="button is-primary">Submit Fail Votes</button>
+                                    <button v-on:click="unsetSquad()" class="button">Back to Team Selection</button>
+                                </div>
+                            </form> <!-- ./Mission Outcome -->
+
+                        </div>
+
+                        <!-- After Action Reports -->
+                        <div class="column has-text-centered">
+                            <h3 class="title">Afer Action Reports</h3>
+                            
+                            <div id="missionReports">
+                                <ol id="missionList">
+                                    <li v-for="(mission, index) in missionList">
+                                        <h5 class="subtitle is-marginless is-6">
+                                            <span v-if="index < currentMission">{{ mission.details.title }}:</span> 
+                                            <span v-bind:class="getMissionStatusClass(mission.status)">{{ mission.status }}</span>
+                                        </h5>
+                                        <div class="content">
+                                            <ul v-if="index < currentMission" class="missionStatsList is-marginless">
+                                                <li>
+                                                    <b>Captain</b>:
+                                                    {{ findPlayer(mission.cyberLeadId).name }}
+                                                </li>
+                                                <li>
+                                                    <b>Players</b>:
+                                                    <span v-html="generateSquadList(mission.squadIds)"></span>
+                                                </li>
+                                                <li v-if="mission.numFailVotesNeeded > 1" class="has-text-danger">
+                                                    <b>Hackers Warning</b>:
+                                                    {{ mission.numFailVotesNeeded }} votes needed to fail this mission.
+                                                </li>
+                                                <li>
+                                                    <b>Fail Votes Cast</b>:
+                                                    {{ mission.numFailVotesCast }}
+                                                </li>
+                                            </ul>
+                                        </div>
+                                    </li>
+                                </ol>
+                            </div>
+
+                            <small v-if="options.showPossibleHackers.value" class="help is-info">
+                                Note: <span class="has-text-orange">Orange-colored players</span> are possible hackers!
+                            </small>
+                        </div> <!-- /After Action Reports -->
+
+                    </div>
+                </div> <!-- Right Column -->
+
+            </div> <!-- /Top Row -->
+
+            <!-- Bottom Row -->
+            <div v-if="scores.winner == 'None'" id="bottom-row" class="columns">
+
+                <!-- Mission Brief -->
+                <div class="column is-three-quarters">
+                    <div class="content has-text-centered">
+                        <h3 class="title is-4">Current Mission Brief: {{ getCurrentMission.details.title }}</h3>
+                        <p>{{ getCurrentMission.details.brief }}</p>
+                        <p v-if="getCurrentMission.details.link">
+                            <a v-bind:href="getCurrentMission.details.link" target="_blank">
+                                Supporting Documentation
+                            </a>
+                        </p>
+                    </div>
+                </div> <!-- /Mission Brief -->
+
+                <!-- Stop Watch -->
+                <div class="column has-text-centered">
+                    <stop-watch></stop-watch>
+                </div> <!-- ./Stop Watch -->
+
+            </div> <!-- /Bottom Row -->
+
+        </div> <!-- Game board -->
+
+        <!-- Game Over Screen -->
+        <div v-if="scores.winner != 'None'">
+            <div id="winnerModal" class="modal">
+                <div v-on:click="closeGameOver()" class="modal-background"></div>
+                <div class="modal-card">
+                    <header class="modal-card-head">
+                        <p class="modal-card-title">Game Over!</p>
+                        <button v-on:click="closeGameOver()" class="delete" aria-label="close"></button>
+                    </header>
+                    <section class="modal-card-body has-text-center">
+                        <p v-bind:class="scores.winner == 'Employees' ? 'has-text-success' : 'has-text-danger'">
+                            The {{ scores.winner }}s have won!
+                        </p>
+                        <br>
+                        <p>The hackers were:</p>
+                        <ul>
+                            <li v-for="id in hackerIds">
+                                {{ findPlayer(id).name }}
+                            </li>
+                        </ul>
+                    </section>
+                    <footer class="modal-card-foot">
+                        <button v-on:click="restart()" class="button">Play Again</button>
+                    </footer>
+                </div>
+            </div>
+        </div> <!-- /Game Over Screen -->
+
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script> <!-- development version, includes helpful console warnings -->
+    <!-- <script src="https://cdn.jsdelivr.net/npm/vue"></script> production version, optimized for size and speed -->
+    <script>
+        // NOTE: See this wiki article for more info: https://en.wikipedia.org/wiki/The_Resistance_(game)
+
+        // Global objects
+        const playerObj = {
+            id: 0,
+            name: null,
+            isHacker: false,
+            isOnSquad: false,
+            isPossibleHacker: false,
+            hasBeenCaptain: false,
+            cellId: null
+        };
+        const cellObj = {
+            id: 0,
+            name: null,
+            contactId: null
+        };
+        const missionObj = {
+            id: 0,
+            cyberLeadId: null,
+            details: null,
+            isSquadConfirmed: false,
+            numFailVotesCast: null,
+            numFailVotesNeeded: 1,
+            playerCount: 0,
+            squadIds: [],
+            status: null,
+        };
+        const missionDetails = [
+            {
+                title: 'Reconnaissance',
+                brief: 'We need to do a full system scan to see what has been compromised. This is the most important step, as we need to find all routes the hackers could have taken to compromise DisneyPlus.',
+                link: null,
+            },
+            {
+                title: 'Secure Nginx',
+                brief: 'Nginx (pronounced “engine X”) is the software DisneyPlus uses for serving their web files to the public. They are currently on Nginx version 1.15.5, which was released in October of 2018! We need to update Nginx to 1.17 ASAP, as there are currently at least 9 known vulnerabilities that the hackers could use to compromise the site!',
+                link: 'https://www.cvedetails.com/vulnerability-list/vendor_id-10048/product_id-17956/Nginx-Nginx.html ',
+            },
+            {
+                title: 'Secure Redis',
+                brief: 'Redis is the database software DisneyPlus uses to store movie, client and employee information. They are currently on version 4.0.1, which was released in June of 2018! We need to update Redis to the latest stable version of 5.0.8 now, as there are currently at least 12 known vulnerabilities, one of which, a code execution vulnerability, hackers have already used to compromise Disney’s data!',
+                link: 'https://www.cvedetails.com/vulnerability-list/vendor_id-18560/product_id-47087/Redislabs-Redis.html',
+            },
+            {
+                title: 'Secure Debian',
+                brief: 'Due to the previous vulnerabilities, the hackers have gained access to Disney’s server. Disney is currently running an outdated version of Debian 9, which has a code execution vulnerability that gives complete access of the server to the hackers. This is unacceptable, and must be patched now!',
+                link: 'https://www.cvedetails.com/cve/CVE-2019-15846/',
+            },
+            {
+                title: 'We found a RAT',
+                brief: 'One of your team members has discovered a RAT, or Remote Access Tool that gives the hackers complete access to Disney’s server. It has been successfully removed, and we’ve discovered it’s a custom version of the caesarRAT, but we need help to further analyze its signature and unmask the hackers. There’s no time to waste, it’s now or never.',
+                link: 'https://securityonline.info/caesarrat-http-based-rat/',
+            },
+        ];
+
+        // Vue Components
+        const intro = Vue.component('intro', {
+            template: `
+                <div id="introModal" class="modal">
+                    <div v-on:click="closeIntro" class="modal-background"></div>
+                    <div class="modal-card">
+                        <header class="modal-card-head">
+                            <p class="modal-card-title">Mission Briefing</p>
+                            <button v-on:click="closeIntro" class="delete" aria-label="close"></button>
+                        </header>
+                        <section class="modal-card-body">
+                            <iframe width="90%" height="40%" src="https://www.youtube.com/embed/kaAHKg9qFPY" frameborder="0" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                            <p>
+                                <strong>Transcript:</strong> If you haven’t already noticed,
+                                <a href="https://www.tomsguide.com/news/these-12-disney-plus-movies-just-disappeared-in-a-snap" target="_blank">Disney classic movies have been disappearing off of DisneyPlus for a few months now</a>.
+                                <a href="https://www.forbes.com/sites/erikkain/2020/01/04/a-bunch-of-movies-are-mysteriously-disappearing-from-disney-plus---heres-why/" target="_blank">Disney has publically claimed that it is due to previous licensing agreements that must be upheld by law</a>,
+                                but the truth is much more serious. DisneyPlus has contracted your team to help them track down the source of an infiltration. Your team has confirmed that employees. These hackers are assumed to know who each other are, and they’ve destroyed DisneyPlus’ employee database so we cannot confirm the identities of the people you will be working with. The hackers have recently been embolden by the current state of panic casued by the current global health pandemic, and Disney has lost faith in their cybersecurity team. You’ll need to figure out the identities of the hackers before they gain root access to DisneyPlus' servers and wipe everything, effectively deleting all the beloved classic movies and ruining many people's night during the social distancing orders by our local governments around the world.
+                            </p>
+                        </section>
+                        <footer class="modal-card-foot">
+                            <button v-on:click="closeIntro" class="button">Okay, got it!</button>
+                        </footer>
+                    </div>
+                </div>
+            `,
+            computed: {
+                self: function () {
+                    return document.getElementById('introModal');
+                },
+            },
+            methods: {
+                closeIntro: function () {
+                    this.self.classList.remove('is-active');
+                },
+                viewIntro: function () {
+                    this.self.classList.add('is-active');
+                },
+            }
+        });
+        const list =  Vue.component('list', {
+            template: `
+                <div class="listContainer">
+                    <h3 class="title">{{ name }} List</h3>
+                    <small v-if="!Array.isArray(items) || !items.length" v-bind:id="'add' + name + 'sNote'" class="help is-info">
+                        Note: Time to register the {{ title }}s,
+                        <strong class="has-text-info">you need at least {{ minAmount }} {{ title }}s to start the game!</strong>
+                    </small>
+                    <div v-else class="centered-list capped-height content">
+                        <ol ref="list" v-bind:id="title + 'List'">
+                            <li v-for="(item, index) in items" v-on:click="remove(index)">
+                                <p v-bind:title="'Click to remove this ' + title + '.'">
+                                    <span v-if="Object.keys(item).length > 1" v-for="(prop, name) in item">
+                                        <strong>{{ name }}</strong>: {{ prop }}<span v-if="item[Object.keys(item)[Object.keys(item).length - 1]] != prop">, </span> 
+                                    </span>
+                                    <span v-else>{{ prop }}</span>
+                                    <i class="delete is-small has-background-danger"></i>
+                                </p>
+                            </li>
+                        </ol>
+                    </div>
+
+                    <form v-on:submit.self.prevent>
+                        <div v-for="opt in options" class="field">
+                            <label v-bind:for="opt.name" class="label">Add {{ opt.name }}:</label>
+                            <div class="control">
+                                <input type="text" ref="input" v-bind:id="opt.name" class="input" v-bind:placeholder="opt.placeholder" autocomplete="off">
+                            </div>
+                        </div>
+
+                        <div class="field is-grouped group-is-centered">
+                            <div class="control">
+                                <button v-on:click="add()" class="button is-info">
+                                    Add {{ name }}
+                                </button>
+                            </div>
+                            <div class="control">
+                                <button v-on:click="clear()" v-bind:disabled="hasNoItems" class="button">
+                                    Remove All {{ name }}s
+                                </button>
+                            </div>
+                            <div class="control">
+                                <button
+                                v-bind:disabled="getListLength() < minAmount"
+                                v-on:click="$root.nextScreen(getList())"
+                                class="button is-primary">
+                                    Finished
+                                </button>
+                            </div>
+                        </div>
+
+                        <div v-if="getListLength() > 0">
+                            <small class="help is-info">
+                                Note: You can remove a single {{ title }} by clicking on their name in the list above.
+                                <br>
+                                <strong class="has-text-info">Remember, you need at least {{ minAmount }} {{ title }}s to start the game!</strong>
+                            </small>
+                        </div>
+                        <div v-if="hasError">
+                            <small class="help is-danger">{{ error }}</small>
+                        </div>
+                    </form>
+                </div>
+            `,
+            data: function() {
+                return {
+                    formLength: 0,
+                    items: [],
+                    name: this.title.charAt(0).toUpperCase() + this.title.slice(1)
+                }
+            },
+            props: {
+                minAmount: {
+                    type: Number,
+                    required: true
+                },
+                options: {
+                    type: Array,
+                    required: false,
+                    default: null
+                },
+                placeholder: {
+                    type: String,
+                    required: false,
+                    default: null
+                },
+                title: {
+                    type: String,
+                    required: true
+                }
+            },
+            computed: {
+                error: function() {
+                    return this.$root.errorMessages[this.title] ? this.$root.errorMessages[this.title] : null;
+                },
+                hasNoItems: function() {
+                    return this.items.length == 0;
+                }
+            },
+            methods: {
+                add: function() {
+                    const inputBoxes = this.$refs.input;
+                    let newItems = {};
+
+                    inputBoxes.forEach(function(inputBox, i) {
+                        newItems[inputBox.id] = inputBox.value; // collect values
+                        inputBoxes[i].value = ''; // clear form
+                    });
+                    newItems = this.filterInput(newItems);
+
+                    const isUnique = this.isUnique(newItems);
+                    const hasNewItems = this.hasNewItems(newItems);
+
+                    if(hasNewItems && isUnique) {
+                        this.$root.errorMessages[this.title] = null;
+                        this.items.push(newItems);
+                        this.sortItems();
+                    } else if(!isUnique) {
+                        this.$root.errorMessages[this.title] = 'Error: Please make sure to use unique names.';
+                    } else {
+                        this.$root.errorMessages[this.title] = 'Error: You did not enter in a value(s).';
+                    }
+                    
+                    this.focusFirstFormEl();
+                },
+                clear: function() {
+                    this.items = [];
+                },
+                filterInput: function(input) {
+                    for(const prop in input) {
+                        input[prop] = input[prop].replace(/[^a-zA-Z0-9' ]/g, "").trim();
+                        input[prop] = input[prop].charAt(0).toUpperCase() + input[prop].slice(1).toLowerCase();
+                    }
+                    
+                    return input;
+                },
+                focusFirstFormEl: function() {
+                    this.$refs.input[0].focus();
+                }, 
+                getList: function() {
+                    return this.items;
+                },
+                getListLength: function() {
+                    return this.items.length;
+                },
+                hasError: function() {
+                    const error = this.error;
+                    return error ? true : false;
+                },
+                hasNewItems: function(input) {
+                    for(item in input) {
+                        const prop = input[item];
+
+                        if(prop == undefined || prop == null || prop == "") {
+                            return false;
+                        }
+                    }
+
+                    return true;
+                },
+                isUnique: function(newItems) {
+                    let isUnique = true;
+
+                    this.items.forEach(function(item) {
+                        if(isUnique) {
+                            for(const prop in newItems) {
+                                if(item[prop] == newItems[prop]) {
+                                    isUnique = false;
+                                    break;
+                                }
+                            }
+                        } else {
+                            return false; // break forEach
+                        }
+                    });
+
+                    return isUnique;
+                },
+                remove: function(index) {
+                    this.items.splice(index, 1);
+                    this.focusFirstFormEl();
+                },
+                sortItems: function() {
+                    this.items.sort(function(a, b) {
+                        const itemA = Object.values(a)[0].toLowerCase();
+                        const itemB = Object.values(b)[0].toLowerCase();
+
+                        return (itemA < itemB) ? -1 : (itemA > itemB) ? 1 : 0;
+                    });
+                }
+            },
+            mounted: function() {
+                this.formLength = this.$refs.input.length;
+                this.$refs.input[0].focus();
+            }
+        });
+        const btnRestart =  Vue.component('btnRestart', {
+            template: `
+                <button v-on:click="$root.restart()" class="button is-danger is-outlined">
+                    <i class="fas fa-power-off"></i>
+                    <span v-if="gameStarted">Restart Game</span>
+                    <span v-else>Reset Game</span>
+                </button>
+            `,
+            props: {
+                gameStarted: {
+                    type: Boolean,
+                    required: false,
+                    default: false
+                }
+            }
+        });
+        const stopWatch = Vue.component('stopWatch', {
+            template: `
+                <div>
+                    <h3 class="title is-4">Stop Watch</h3>
+                
+                    <div class="content">
+                        <h5 class="subtitle is-marginless">{{ time }}</h5>
+                    </div>
+                
+                    <div class="content">
+                        <button v-on:click="resume" v-if="state == 'stopped' || state == 'paused'"
+                            class="button is-rounded">
+                            <span class="icon">
+                                <i class="fas fa-play is-marginless"></i>
+                            </span>
+                        </button>
+                        <button v-on:click="pause" v-if="state == 'started'" class="button is-rounded">
+                            <span class="icon">
+                                <i class="fas fa-pause is-marginless"></i>
+                            </span>
+                        </button>
+                        <button v-on:click="stop" v-if="state != 'stopped'" class="button is-rounded">
+                            <span class="icon">
+                                <i class="fas fa-stop is-marginless"></i>
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            `,
+            data: function () {
+                return {
+                    difference: 0,
+                    currentTime: 0,
+                    interval: 0,
+                    pausedTime: 0,
+                    startTime: 0,
+                    state: 'stopped',
+                };
+            },
+            computed: {
+                hours: function () {
+                    const lapsed = this.milliseconds;
+                    const hrs = Math.floor((lapsed / 1000 / 60 / 60));
+
+                    return (hrs >= 10) ? hrs : `0${hrs}`;
+                },
+                milliseconds: function () {
+                    return this.currentTime - this.startTime - this.difference;
+                },
+                minutes: function () {
+                    const lapsed = this.milliseconds;
+                    const mins = Math.floor((lapsed / 1000 / 60) % 60);
+
+                    return (mins >= 10) ? mins : `0${mins}`;
+                },
+                seconds: function () {
+                    const lapsed = this.milliseconds;
+                    const secs = Math.ceil((lapsed / 1000) % 60);
+
+                    return (secs >= 10) ? secs : `0${secs}`;
+                },
+                time: function () {
+                    let secs = this.seconds;
+                    let mins = this.minutes;
+                    let hrs = this.hours;
+
+                    if (secs == 60) {
+                        secs = '00';
+                        mins = (mins == 60) ? 1 : (parseInt(mins) + 1);
+                        mins = (mins < 10) ? `0${mins}` : `${mins}`;
+                    }
+
+                    if (mins == 60) {
+                        mins = '00';
+                        hrs = (hrs == 99) ? 1 : (parseInt(hrs) + 1);
+                        hrs = (hrs < 10) ? `0${hrs}` : `${hrs}`;
+                    }
+
+                    return secs ? `${hrs}:${mins}:${secs}` : '00:00:00';
+                },
+            },
+            methods: {
+                pause: function () {
+                    clearInterval(this.interval);
+                    this.pausedTime = Date.now();
+                    this.state = 'paused';
+                },
+                resume: function () {
+                    if (this.state == 'stopped') {
+                        this.reset();
+                    } else {
+                        this.difference += Date.now() - this.pausedTime;
+                    }
+
+                    this.state = 'started';
+                    this.interval = setInterval(this.update, 1);
+                },
+                reset: function () {
+                    this.startTime = Date.now();
+                    this.currentTime = Date.now();
+                    this.difference = 0;
+                },
+                stop: function () {
+                    clearInterval(this.interval);
+                    this.reset();
+                    this.state = 'stopped';
+                },
+                update: function () {
+                    if (this.state == 'started') {
+                        this.currentTime = Date.now();
+                    }
+                },
+            }
+        });
+
+        // Initial Game State
+        function initialGameState() {
+            return {
+                canViewHackers: false,
+                cellList: [],
+                currentMission: 0,
+                defaultValues: {
+                    minimumPlayers: 4,
+                    missionCount: 5,
+                    setUpMaxSteps: 4
+                },
+                errorMessages: {
+                    player: null,
+                    squad: null
+                },
+                hackerIds: [],
+                isCellBattle: false,
+                isGameStarted: false,
+                missionList: [],
+                options: {
+                    showPossibleHackers: {
+                        type: Boolean,
+                        name: 'Show Possible Hackers',
+                        description: 'During game play, the game will automatically color code possible hackers in the After Action Reports. Players will be considered possible hackers if they were apart of at least one mission that failed.',
+                        default: false,
+                        value: false
+                    }
+                },
+                playerList: [],
+                scores: {
+                    employees: 0,
+                    hackers: 0,
+                    winner: 'None',
+                },
+                setUpCurrentStep: 0
+            };
+        }
+
+        const game = new Vue({
+            el: '#app',
+            data: function () {
+                return initialGameState();
+            },
+            components: {
+                'btn-restart': btnRestart,
+                'intro': intro,
+                'list': list,
+                'stop-watch': stopWatch
+            },
+            computed: {
+                getCurrentMission: function() {
+                    return game.missionList[game.currentMission - 1];
+                },
+                getGameType: function() {
+                    return game.isCellBattle ? 'Cell Battle' : 'Normal';
+                },
+                hasPlayerList: function () {
+                    Vue.nextTick(function () {
+                        return true; // component has been rendered
+                    });
+
+                    return true;
+                },
+                isSquadSet: function() {
+                    return game.getCurrentMission.squadIds.length == game.getCurrentMission.playerCount;
+                },
+                numHackers: function () {
+                    let numPlayers = game.playerList.length;
+                    let numHackers = 0;
+
+                    if (numPlayers < 5) {
+                        numHackers = 1;
+                    } else if (numPlayers == 5 || numPlayers == 6) {
+                        numHackers = 2;
+                    } else if (numPlayers >= 7 && numPlayers <= 9) {
+                        numHackers = 3;
+                    } else if (numPlayers == 10 || numPlayers == 11) {
+                        numHackers = 4;
+                    }
+
+                    return numHackers;
+                },
+            },
+            methods: {
+                addPlayerToSquad: function() {
+                    const el = document.getElementById('playerSelect');
+                    const playerId = el.options[el.selectedIndex].value;
+                    
+                    if(playerId >= 0) {
+                        const player = game.playerList[playerId];
+                        player.isOnSquad = true;
+
+                        game.errorMessages.squad = null;
+                        game.getCurrentMission.squadIds.push(playerId);
+                        el.value = -1;
+                    } else {
+                        game.errorMessages.squad = "Please select a valid player.";
+                    }
+                },
+                assignPlayerRoles: function() {
+                    let choices = [];
+                    const numHackers = game.numHackers;
+                    game.hackerIds = [];
+
+                    for(let i = 0; i < numHackers; i++) {
+                        let choice = 0;
+
+                        do {
+                            choice = Math.round(Math.random() * (game.playerList.length - 1));
+                        } while (choices.indexOf(choice) != -1); // Get a unique player
+
+                        choices.push(choice);
+                        game.hackerIds.push(game.playerList[choice].id);
+                    }
+                },
+                checkForWinner: function () {
+                    const empScore = game.scores.employees;
+                    const hacScore = game.scores.hackers;
+                    const missionCount = game.defaultValues.missionCount;
+                    let winner = null;
+
+                    if(empScore > Math.floor(missionCount / 2)) {
+                        winner = 'Employees';
+                    } else if(hacScore > Math.floor(missionCount / 2)) {
+                        winner = 'Hackers';
+                    } else if(empScore + hacScore == missionCount) {
+                        winner = (empScore > hacScore) ? 'Employees' : 'Hackers';
+                    }
+
+                    if(winner) {
+                        game.scores.winner = winner;
+
+                        Vue.nextTick(function () {
+                            document.getElementById('winnerModal').classList.add('is-active');
+                        });
+                    }
+                },
+                clearSquad: function() {
+                    game.playerList.forEach(function (player) {
+                        player.isOnSquad = false;
+                    });
+                },
+                closeGameOver: function () {
+                    document.getElementById('winnerModal').classList.remove('is-active');
+                },
+                confirmSquad: function() {
+                    game.getCurrentMission.isSquadConfirmed = true;
+                    game.errorMessages.squad = null;
+                },
+                findPlayer: function(playerId) {
+                    return game.playerList.find(function(player) {
+                        return player.id == playerId;
+                    });
+                },
+                generateSquadList: function(squadIds) {
+                    let list = "";
+                    const squadLength = squadIds.length - 1;
+
+                    squadIds.forEach(function(playerId, index) {
+                        const player = game.findPlayer(playerId);
+
+                        if(game.options.showPossibleHackers.value && player.isPossibleHacker) {
+                            list += '<span class="has-text-orange">' + player.name + '</span>';
+                        } else {
+                            list += player.name;
+                        }
+                        list += (index < squadLength) ? ', ' : '';
+                    });
+
+                    return list;
+                },
+                getMissionSquadCount: function(mission) {
+                    const totPlayers = game.playerList.length;
+                    let numPlayers = 0;
+
+                    if (mission == 1) {
+                        numPlayers = (totPlayers >= 8 && totPlayers <= 11) ? 3 : 2;
+                    } else if (mission == 2) {
+                        numPlayers = (totPlayers >= 8 && totPlayers <= 11) ? 4 : 3;
+                    } else if (mission == 3) {
+                        if (totPlayers == 6 || (totPlayers >= 8 && totPlayers <= 11)) {
+                            numPlayers = 4;
+                        } else if (totPlayers == 7) {
+                            numPlayers = 3;
+                        } else if (totPlayers <= 5) {
+                            numPlayers = 2;
+                        }
+                    } else if (mission == 4) {
+                        if (totPlayers >= 8 && totPlayers <= 11) {
+                            numPlayers = 5;
+                        } else if (totPlayers == 7) {
+                            numPlayers = 4;
+                        } else if (totPlayers <= 6) {
+                            numPlayers = 3;
+                        }
+                    } else if (mission == 5) {
+                        if (totPlayers >= 8 && totPlayers <= 11) {
+                            numPlayers = 5;
+                        } else if (totPlayers == 6 || totPlayers == 7) {
+                            numPlayers = 4;
+                        } else if (totPlayers <= 6) {
+                            numPlayers = 3;
+                        }
+                    }
+
+                    return numPlayers;
+                },
+                getMissionStatusClass: function(missionStatus) {
+                    if(missionStatus == 'Success') {
+                        return 'has-text-success';
+                    } else if(missionStatus == 'Failed') {
+                        return 'has-text-danger';
+                    } else if(missionStatus == 'In Progress...') {
+                        return 'has-text-info';
+                    } else {
+                        return 'has-text-grey-light';
+                    }
+                },
+                getPlayerColorClass: function(playerId) {
+                    if(game.isGameStarted == true && game.scores.winner != 'None') {
+                        const player = game.findPlayer(playerId);
+
+                        return player.isHacker ? 'has-text-danger' : 'has-text-success';
+                    }
+
+                    return '';
+                },
+                nextScreen: function(settingValue) {
+                    switch(game.setUpCurrentStep) {
+                        case 0:
+                            game.isCellBattle = settingValue;
+                            break;
+                        case 1:
+                            game.setUpPlayers(settingValue);
+                            break;
+                        case 2:
+                            game.setUpHackers();
+                            break;
+                        case 3:
+                            // Do nothing
+                            break;
+                        case 4:
+                            game.setUpMissions();
+                            game.isGameStarted = true;
+                            break;
+                        default:
+                            alert('There is an error with the game setup, please contact Ryan Huett [rhuett@cypresscollege.edu] for a fix.');
+                            game.restart();
+                            break;
+                    }
+
+                    game.setUpCurrentStep++;
+                },
+                prevScreen: function () {
+                    game.setUpCurrentStep--;
+                },
+                removePlayerFromSquad: function(playerIdLoc) {
+                    const mission = game.getCurrentMission;
+                    let player = game.findPlayer(mission.squadIds[playerIdLoc]);
+
+                    mission.squadIds.splice(playerIdLoc, 1);
+                    player.isOnSquad = false;
+                },
+                restart: function() {
+                    Object.assign(game.$data, initialGameState());
+                },
+                selectCyberLead: function() {
+                    let eligiblePlayers = [];
+
+                    for(let i = 0; i < game.playerList.length; i++) {
+                        if(!game.playerList[i].hasBeenCaptain) {
+                            eligiblePlayers.push(game.playerList[i].id);
+                        }
+                    }
+
+                    const choice = Math.round(Math.random() * (eligiblePlayers.length - 1));
+                    const chosenPlayerId = eligiblePlayers[choice];
+
+                    game.playerList[chosenPlayerId].hasBeenCaptain = true;
+                    return chosenPlayerId;
+                },
+                setUpHackers: function() {
+                    for(let i = 0; i < game.hackerIds.length; i++) {
+                        let player = game.findPlayer(game.hackerIds[i]);
+                        player.isHacker = true;
+                    }
+                },
+                setUpMissions: function() {
+                    for(let i = 1; i <= game.defaultValues.missionCount; i++) {
+                        let mission = new Object();
+
+                        Object.assign(mission, missionObj);
+                        mission.id = i;
+                        mission.cyberLeadId = game.selectCyberLead();
+                        mission.details = missionDetails[i - 1];
+                        mission.numFailVotesNeeded = (game.playerList.length >= 7 && i == 4) ? 2 : 1;
+                        mission.playerCount = game.getMissionSquadCount(i);
+                        mission.status = (i == 1) ? 'In Progress...' : 'Unknown';
+                        game.missionList.push(mission);
+                    }
+
+                    game.currentMission = 1;
+                    game.unsetSquad(); // Remove squad on replay for first mission
+                },
+                setUpPlayers: function(players) {
+                    game.playerList = [];
+                    game.cellList = [];
+
+                    players.forEach(function(playerInfo, i) {
+                        let player = new Object();
+                        Object.assign(player, playerObj);
+
+                        if (game.isCellBattle) {
+                            let cell = new Object();
+                            Object.assign(cell, cellObj);
+
+                            player.cellId = i;
+                            player.name = playerInfo['Contact'];
+
+                            cell.id = i;
+                            cell.name = playerInfo['Cell'];
+                            cell.contactId = i;
+                            game.cellList.push(cell);
+                        } else {
+                            player.name = playerInfo['Player'];
+                        }
+
+                        player.id = i;
+                        game.playerList.push(player);
+                        game.errorMessages.player = null;
+                    });
+
+                    if(game.playerList.length == 4) {
+                        game.defaultValues.missionCount = 4;
+                    }
+                    
+                },
+                toggleHackerView: function() {
+                    game.canViewHackers = !game.canViewHackers;
+                },
+                unsetSquad: function() {
+                    game.getCurrentMission.squadIds = [];
+                    game.getCurrentMission.isSquadConfirmed = false;
+                    game.clearSquad();    
+                },
+                updateMission: function() {
+                    let numFailVotes = parseInt(document.getElementById('numFailVotes').value);
+                    numFailVotes = isNaN(numFailVotes) ? 0 : numFailVotes;
+                    const mission = game.getCurrentMission;
+                    const missionFailed = (numFailVotes >= mission.numFailVotesNeeded);
+
+                    mission.status = missionFailed ? 'Failed' : 'Success';
+                    mission.numFailVotesCast = numFailVotes;
+
+                    if(missionFailed) {
+                        game.scores.hackers++;
+                        game.getCurrentMission.squadIds.forEach(function(playerId) {
+                            game.findPlayer(playerId).isPossibleHacker = true;
+                        });
+                    } else {
+                        game.scores.employees++;
+                    }
+
+                    game.checkForWinner();
+                    if(game.currentMission < game.defaultValues.missionCount) {
+                        game.currentMission++;
+                        game.getCurrentMission.status = 'In Progress...';
+                        game.unsetSquad();
+                    }
+                },
+            }
+        });
+    </script>
+</body>
+</html>
