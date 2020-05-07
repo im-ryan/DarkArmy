@@ -14,6 +14,7 @@ You will need an internet connection in order to play or edit this game. Simple,
 
 * [Vue.js](https://vuejs.org/v2/guide/) - The JavaScript framework used
 * [Bulma](https://bulma.io/documentation/) - The CSS framework used
+* [FontAwesome](https://fontawesome.com/) - For all icons used
 
 ## Contributing
 
