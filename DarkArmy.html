@@ -1229,6 +1229,9 @@
                     game.setUpCurrentStep++;
                 },
                 prevScreen: function () {
+                    if(game.setUpCurrentStep == 2 && game.hackerIds.length > 0) {
+                        game.hackerIds = [];
+                    }
                     game.setUpCurrentStep--;
                 },
                 removePlayerFromSquad: function(playerIdLoc) {
